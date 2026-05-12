@@ -23,17 +23,19 @@
 
 ### STEP 1 — Disable hibernate (fixes "apps closing")
 
-Create the file (as root):
-
 ```bash
 sudo mkdir -p /etc/systemd/sleep.conf.d
-sudo tee /etc/systemd/sleep.conf.d/thinkpad.conf << 'EOF'
+sudo vi /etc/systemd/sleep.conf.d/thinkpad.conf
+```
+
+Content:
+
+```ini
 [Sleep]
 AllowSuspend=yes
 AllowHibernation=no
 AllowSuspendThenHibernate=no
 AllowHybridSleep=no
-EOF
 ```
 
 ---
@@ -60,32 +62,31 @@ gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'no
 #### 3a. udev rule to disable USB autosuspend for the device
 
 ```bash
-sudo tee /etc/udev/rules.d/99-fingerprint-pm.rules << 'EOF'
+sudo vi /etc/udev/rules.d/99-fingerprint-pm.rules
+```
+
+Content:
+
+```
 # Digital Persona U.are.U 4500 - disable USB autosuspend
 ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="05ba", ATTR{idProduct}=="000a", \
   ATTR{power/autosuspend}="-1", \
   ATTR{power/control}="on"
-EOF
 ```
 
-Apply immediately (no reboot needed):
+Apply to the live device (no reboot needed):
 
 ```bash
 sudo udevadm control --reload-rules
-sudo udevadm trigger
-```
 
-Apply immediately to the live device (path may differ — find yours first):
-
-```bash
-# Find the current path
+# Find the current device path
 for d in /sys/bus/usb/devices/*/; do [ "$(cat $d/idVendor 2>/dev/null)" = "05ba" ] && echo $d; done
 
-# Trigger udev add event for the device (replace 3-3.2.4 with actual path)
+# Trigger udev add event (replace 3-3.2.4 with actual path)
 sudo udevadm trigger --action=add /sys/bus/usb/devices/3-3.2.4/
 ```
 
-Verify it worked:
+Verify:
 
 ```bash
 # Replace 3-3.2.4 with the path found above
@@ -96,7 +97,12 @@ cat /sys/bus/usb/devices/3-3.2.4/power/control
 #### 3b. Script to reinitialize the reader after system wake
 
 ```bash
-sudo tee /usr/lib/systemd/system-sleep/fingerprint-reset.sh << 'EOF'
+sudo vi /usr/lib/systemd/system-sleep/fingerprint-reset.sh
+```
+
+Content:
+
+```bash
 #!/bin/bash
 if [ "$1" = "post" ]; then
     sleep 2
@@ -112,8 +118,9 @@ if [ "$1" = "post" ]; then
     done
     systemctl restart fprintd.service 2>/dev/null
 fi
-EOF
+```
 
+```bash
 sudo chmod +x /usr/lib/systemd/system-sleep/fingerprint-reset.sh
 ```
 
