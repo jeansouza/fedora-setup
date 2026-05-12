@@ -13,7 +13,7 @@ This repo documents the Fedora 43 configuration and fixes on Jean's ThinkPad T14
 ## Repo conventions
 
 - Each fix or configuration lives in the most specific subdirectory (`power-management/`, `hardware/`, etc.)
-- Docs are Markdown; include a **Diagnóstico** section explaining *why* before the fix steps
+- Docs are Markdown; include a **Diagnosis** section explaining *why* before the fix steps
 - Scripts that live on the system go in `scripts/` with the intended deploy path noted in a comment at the top
 - Dotfiles tracked here mirror the real paths; note the real path in a comment or frontmatter
 
