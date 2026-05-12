@@ -1,27 +1,29 @@
-# Correção de Power Management - ThinkPad T14 + Fedora 43 + Dock
+# Power Management Fix — ThinkPad T14 + Fedora 43 + Dock
 
-## Problemas
+## Problems
 
-1. **Wake lento (~1 min)** após screen lock + inatividade
-2. **Programas fechados** às vezes após wake (indica hibernate ou crash)
-3. **Leitor de impressão digital** (Digital Persona U.R.U 4500) para de funcionar após wake
+1. **Slow wake (~1 min)** after screen lock + inactivity
+2. **Apps closing** sometimes after wake (indicates hibernate or crash)
+3. **Fingerprint reader** (Digital Persona U.R.U 4500) stops working after wake
 
-## Diagnóstico
+## Diagnosis
 
-- Sleep mode atual: `s2idle` (shallow sleep - deep sleep não disponível no hardware)
-- GNOME auto-suspend: 15 min de inatividade → suspend (causa o wake lento via dock)
-- Fingerprint USB ID: `05ba:000a`, path: `/sys/devices/.../usb3/3-10/`
-  - `power/control = auto` → autosuspend ativo, coloca device em mau estado
-  - `power/autosuspend_delay_ms = 2000` → suspende após 2s
+- Current sleep mode: `s2idle` (shallow sleep — deep sleep not available on this hardware)
+- GNOME auto-suspend: 15 min of inactivity → suspend (causes slow wake via dock)
+- Fingerprint USB ID: `05ba:000a`, observed path: `/sys/bus/usb/devices/3-3.2.4/`
+  - Path is dock-port-dependent and may differ between sessions — always locate by vendor ID
+  - `power/control = auto` → autosuspend active, puts device in bad state
+  - `power/autosuspend_delay_ms = 2000` → suspends after 2s
   - `power/wakeup = disabled`
+  - Find the current path: `for d in /sys/bus/usb/devices/*/; do [ "$(cat $d/idVendor 2>/dev/null)" = "05ba" ] && echo $d; done`
 
 ---
 
-## Passo a Passo das Correções
+## Step-by-Step Fixes
 
-### PASSO 1 — Desabilitar hibernate (corrige "programas fechados")
+### STEP 1 — Disable hibernate (fixes "apps closing")
 
-Criar o arquivo (como root):
+Create the file (as root):
 
 ```bash
 sudo mkdir -p /etc/systemd/sleep.conf.d
@@ -36,56 +38,66 @@ EOF
 
 ---
 
-### PASSO 2 — Desabilitar auto-suspend do GNOME (corrige wake lento)
+### STEP 2 — Disable GNOME auto-suspend (fixes slow wake)
 
-Executar como **usuário normal** (não root):
+Run as **normal user** (not root):
 
 ```bash
-# Opção A: Desabilitar suspend automático completamente quando plugado na tomada
+# Option A: Disable automatic suspend entirely when plugged in (AC)
 gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing'
 
-# Opção B: Só aumentar o tempo para 30 minutos (mais conservador)
+# Option B: Just increase the timeout to 30 minutes (more conservative)
 # gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-timeout 1800
 ```
 
-> Com a opção A, o sistema nunca suspende sozinho quando está na tomada (dock).
-> Só a tela desliga. Wake é instantâneo porque não há suspend real.
+> With Option A, the system never auto-suspends when on AC power (dock).
+> Only the screen turns off. Wake is instant because there is no real suspend.
 
 ---
 
-### PASSO 3 — Corrigir leitor de impressão digital após wake
+### STEP 3 — Fix fingerprint reader after wake
 
-#### 3a. Regra udev para desabilitar autosuspend do device
+#### 3a. udev rule to disable USB autosuspend for the device
 
 ```bash
 sudo tee /etc/udev/rules.d/99-fingerprint-pm.rules << 'EOF'
-# Digital Persona U.are.U 4500 - desabilita USB autosuspend
+# Digital Persona U.are.U 4500 - disable USB autosuspend
 ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="05ba", ATTR{idProduct}=="000a", \
   ATTR{power/autosuspend}="-1", \
   ATTR{power/control}="on"
 EOF
 ```
 
-Aplicar imediatamente (sem precisar reiniciar):
+Apply immediately (no reboot needed):
 
 ```bash
 sudo udevadm control --reload-rules
 sudo udevadm trigger
 ```
 
-Verificar se funcionou:
+Apply immediately to the live device (path may differ — find yours first):
 
 ```bash
-cat /sys/bus/usb/devices/3-10/power/control
-# Deve mostrar: on
+# Find the current path
+for d in /sys/bus/usb/devices/*/; do [ "$(cat $d/idVendor 2>/dev/null)" = "05ba" ] && echo $d; done
+
+# Trigger udev add event for the device (replace 3-3.2.4 with actual path)
+sudo udevadm trigger --action=add /sys/bus/usb/devices/3-3.2.4/
 ```
 
-#### 3b. Script para reinicializar o leitor após wake do sistema
+Verify it worked:
+
+```bash
+# Replace 3-3.2.4 with the path found above
+cat /sys/bus/usb/devices/3-3.2.4/power/control
+# Should show: on
+```
+
+#### 3b. Script to reinitialize the reader after system wake
 
 ```bash
 sudo tee /usr/lib/systemd/system-sleep/fingerprint-reset.sh << 'EOF'
 #!/bin/bash
-# Reinicializa o leitor de impressão digital após wake do sistema
 if [ "$1" = "post" ]; then
     sleep 2
     for device in /sys/bus/usb/devices/*/; do
@@ -107,28 +119,28 @@ sudo chmod +x /usr/lib/systemd/system-sleep/fingerprint-reset.sh
 
 ---
 
-## Resumo dos arquivos criados
+## Summary of Created Files
 
-| Arquivo | O que faz |
-|---------|-----------|
-| `/etc/systemd/sleep.conf.d/thinkpad.conf` | Desabilita hibernate e hybrid sleep |
-| `/etc/udev/rules.d/99-fingerprint-pm.rules` | Mantém leitor USB sempre ativo (sem autosuspend) |
-| `/usr/lib/systemd/system-sleep/fingerprint-reset.sh` | Rebind do leitor após cada wake do sistema |
+| File | Purpose |
+|------|---------|
+| `/etc/systemd/sleep.conf.d/thinkpad.conf` | Disables hibernate and hybrid sleep |
+| `/etc/udev/rules.d/99-fingerprint-pm.rules` | Keeps fingerprint USB always active (no autosuspend) |
+| `/usr/lib/systemd/system-sleep/fingerprint-reset.sh` | Rebinds the reader after each system wake |
 
 ---
 
-## Verificação após aplicar
+## Verification After Applying
 
-1. **Fingerprint:** Bloquear tela → esperar 5 min → desbloquear → testar leitor (deve funcionar sem reconectar)
-2. **Wake:** Com `sleep-inactive-ac-type = nothing`, a tela só escurece — wake é instantâneo
-3. **Programas:** Com hibernate desabilitado, apps não fecham mais. Se ainda acontecer → investigar com:
+1. **Fingerprint:** Lock screen → wait 5 min → unlock → test reader (should work without reconnecting)
+2. **Wake:** With `sleep-inactive-ac-type = nothing`, only the screen dims — wake is instant
+3. **Apps:** With hibernate disabled, apps no longer close. If it still happens → investigate with:
    ```bash
    journalctl -b -1 --no-pager | tail -100
    ```
 
 ---
 
-## Reverter (se precisar desfazer)
+## Revert (if needed)
 
 ```bash
 sudo rm /etc/systemd/sleep.conf.d/thinkpad.conf
