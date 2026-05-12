@@ -1,0 +1,8 @@
+# Deploy path: ~/.XCompose
+
+include "%L"
+
+# Fix: dead_acute + c/C → ç/Ç (Brazilian Portuguese convention)
+# XKB us(intl) maps this to ć/Ć by default
+<dead_acute> <c> : "ç" ccedilla
+<dead_acute> <C> : "Ç" Ccedilla
