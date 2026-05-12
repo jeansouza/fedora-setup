@@ -79,18 +79,18 @@ Apply to the live device (no reboot needed):
 ```bash
 sudo udevadm control --reload-rules
 
-# Find the current device path
-for d in /sys/bus/usb/devices/*/; do [ "$(cat $d/idVendor 2>/dev/null)" = "05ba" ] && echo $d; done
-
-# Trigger udev add event (replace 3-3.2.4 with actual path)
-sudo udevadm trigger --action=add /sys/bus/usb/devices/3-3.2.4/
+# Trigger udev add event for the fingerprint reader (path-independent)
+for d in /sys/bus/usb/devices/*/; do
+  [ "$(cat $d/idVendor 2>/dev/null)" = "05ba" ] && sudo udevadm trigger --action=add "$d"
+done
 ```
 
 Verify:
 
 ```bash
-# Replace 3-3.2.4 with the path found above
-cat /sys/bus/usb/devices/3-3.2.4/power/control
+for d in /sys/bus/usb/devices/*/; do
+  [ "$(cat $d/idVendor 2>/dev/null)" = "05ba" ] && cat "${d}power/control"
+done
 # Should show: on
 ```
 
