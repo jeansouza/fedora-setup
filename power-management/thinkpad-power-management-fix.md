@@ -2,9 +2,10 @@
 
 ## Problems
 
-1. **Slow wake (~1 min)** after screen lock + inactivity
+1. **Slow wake (~1 min)** after screen lock + inactivity — caused by GNOME auto-suspend (fixed in Step 2)
 2. **Apps closing** sometimes after wake (indicates hibernate or crash)
 3. **Fingerprint reader** (Digital Persona U.R.U 4500) stops working after wake
+4. **90-second lock screen delay** after monitor wakes from its own energy saving — caused by DisplayPort MST link retraining failures (fixed in Step 4)
 
 ## Diagnosis
 
@@ -126,6 +127,64 @@ sudo chmod +x /usr/lib/systemd/system-sleep/fingerprint-reset.sh
 
 ---
 
+### STEP 4 — Fix DisplayPort link retraining delay on monitor wake
+
+#### Diagnosis
+
+When the LG monitors activate their own energy saving (independent of GNOME DPMS, which is
+already disabled), they drop the DisplayPort connection to the dock. On wake, the i915 driver
+must re-establish the MST (Multi-Stream Transport) link. This fails repeatedly with ACT
+handshake timeouts visible in the journal:
+
+```
+i915 0000:00:02.0: [drm] *ERROR* Failed to get ACT after 3000 ms, last status: 00
+```
+
+Each failure takes 3 seconds; with multiple retries and the monitor cycling back to sleep
+(showing "no signal" each time), the total delay reaches ~90 seconds before the lock screen
+appears.
+
+Affected ports: `card1-DP-6` and `card1-DP-7`.
+
+#### 4a. Turn off energy saving on the LG monitors (hardware fix)
+
+On each monitor's OSD menu, disable:
+- **Smart Energy Saving** (or equivalent)
+- **Auto Power Off** / **No Signal Power Off**
+
+This prevents the DP link from being dropped in the first place. The exact menu path
+depends on the LG model (22" and 34").
+
+#### 4b. Disable i915 Display C-states (software fix)
+
+```bash
+sudo vi /etc/modprobe.d/i915.conf
+```
+
+Content (also tracked at `scripts/i915.conf` in this repo):
+
+```
+options i915 enable_dc=0
+```
+
+Then rebuild the initramfs and reboot:
+
+```bash
+sudo dracut --force
+sudo reboot
+```
+
+Verify after reboot:
+
+```bash
+# Should show enable_dc:0
+sudo systool -m i915 -av 2>/dev/null | grep enable_dc
+# Or check journal — ACT timeout errors should be gone on next monitor wake
+journalctl -b --no-pager | grep -i "Failed to get ACT"
+```
+
+---
+
 ## Summary of Created Files
 
 | File | Purpose |
@@ -133,6 +192,7 @@ sudo chmod +x /usr/lib/systemd/system-sleep/fingerprint-reset.sh
 | `/etc/systemd/sleep.conf.d/thinkpad.conf` | Disables hibernate and hybrid sleep |
 | `/etc/udev/rules.d/99-fingerprint-pm.rules` | Keeps fingerprint USB always active (no autosuspend) |
 | `/usr/lib/systemd/system-sleep/fingerprint-reset.sh` | Rebinds the reader after each system wake |
+| `/etc/modprobe.d/i915.conf` | Disables i915 Display C-states to prevent DP MST link drops |
 
 ---
 
@@ -144,6 +204,7 @@ sudo chmod +x /usr/lib/systemd/system-sleep/fingerprint-reset.sh
    ```bash
    journalctl -b -1 --no-pager | tail -100
    ```
+4. **Lock screen delay:** Lock → let monitors sleep → wake mouse/keyboard → lock screen should appear within a few seconds, not ~90s. No `Failed to get ACT` errors in journal.
 
 ---
 
@@ -153,6 +214,8 @@ sudo chmod +x /usr/lib/systemd/system-sleep/fingerprint-reset.sh
 sudo rm /etc/systemd/sleep.conf.d/thinkpad.conf
 sudo rm /etc/udev/rules.d/99-fingerprint-pm.rules
 sudo rm /usr/lib/systemd/system-sleep/fingerprint-reset.sh
+sudo rm /etc/modprobe.d/i915.conf
 gsettings reset org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type
 sudo udevadm control --reload-rules
+sudo dracut --force
 ```
