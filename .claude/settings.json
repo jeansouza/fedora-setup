@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sudo -v || true",
+            "statusMessage": "Waiting for fingerprint authentication..."
+          }
+        ]
+      }
+    ]
+  }
+}
