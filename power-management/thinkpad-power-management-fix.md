@@ -127,60 +127,96 @@ sudo chmod +x /usr/lib/systemd/system-sleep/fingerprint-reset.sh
 
 ---
 
-### STEP 4 — Fix DisplayPort link retraining delay on monitor wake
+### STEP 4 — Fix DisplayPort link retraining on monitor wake
 
-#### Diagnosis
+#### Diagnosis (updated)
 
-When the LG monitors activate their own energy saving (independent of GNOME DPMS, which is
-already disabled), they drop the DisplayPort connection to the dock. On wake, the i915 driver
-must re-establish the MST (Multi-Stream Transport) link. This fails repeatedly with ACT
-handshake timeouts visible in the journal:
+When GNOME blanks the screen (10-minute idle-delay timer), it sends DPMS-off to all
+displays. The LG monitors interpret this as "no signal" and drop the DisplayPort connection
+to the dock. On wake (user moves mouse → DPMS-on), the ThinkPad's i915 driver needs to
+rebuild the MST (Multi-Stream Transport) link, but the monitors aren't fully awake yet when
+the first ACT handshake fires. The monitors detect "no signal" (video pipeline not ready)
+and go back into power saving. The i915 driver then retries every ~20 seconds:
 
 ```
 i915 0000:00:02.0: [drm] *ERROR* Failed to get ACT after 3000 ms, last status: 00
 ```
 
-Each failure takes 3 seconds; with multiple retries and the monitor cycling back to sleep
-(showing "no signal" each time), the total delay reaches ~90 seconds before the lock screen
-appears.
+The monitors stay dark until the ACT finally succeeds (when the monitor happens to be
+receptive at the moment of a retry). Observed symptom: monitors wake briefly, show nothing,
+return to power saving; workaround was to switch monitor input to MacBook and back.
 
-Affected ports: `card1-DP-6` and `card1-DP-7`.
+**Why `enable_dc=0` doesn't fix this:** DC states are GPU power management (render engine
+idle). DPMS-off is an explicit command to the display connectors — a different mechanism
+that `enable_dc=0` does not affect. The parameter is applied correctly (kernel log confirms
+"Setting dangerous option enable_dc") but the link drop is caused by the monitor's own
+response to receiving no signal.
 
-#### 4a. Turn off energy saving on the LG monitors (hardware fix)
+**Connector map (may change between boots):**
+- Physical Thunderbolt dock trunk: `card1-DP-6` (referenced in driver errors)
+- MST virtual connectors (the actual monitors): `card1-DP-8` and `card1-DP-9`
+
+#### 4a. Turn off energy saving on the LG monitors (hardware fix — partially done)
 
 On each monitor's OSD menu, disable:
-- **Smart Energy Saving** (or equivalent)
-- **Auto Power Off** / **No Signal Power Off**
+- **Smart Energy Saving** — done
+- **Auto Power Off** / **No Signal Power Off** — this is the setting that drops the DP link;
+  not available in OSD on these models
 
-This prevents the DP link from being dropped in the first place. The exact menu path
-depends on the LG model (22" and 34").
+#### 4b. ~~Disable i915 Display C-states~~ (removed)
 
-#### 4b. Disable i915 Display C-states (software fix)
+`enable_dc=0` was previously applied via `/etc/modprobe.d/i915.conf` based on a
+misdiagnosis — DC states are GPU power management, not the cause of DPMS-triggered DP link
+drops. The parameter also taints the kernel (`TAINT_USER`). It has been removed; the actual
+fix is Step 4c below.
+
+#### 4c. DP MST recovery service (software fix for wake)
+
+A user-level systemd service watches mutter's `PowerSaveMode` D-Bus property for
+transitions to `0` (DPMS-on, screen waking). On each wake event it runs a background loop
+that cycles `PowerSaveMode` between `3` (off) and `0` (on) every ~6 seconds, giving the
+LG monitors repeated chances to complete the i915 MST ACT handshake. The loop exits as
+soon as both monitors appear as `connected` in sysfs (checked after each cycle, never
+before, to avoid a transient false positive during the initial ACT attempt). A 90-second
+debounce in the monitor script prevents the script's own `PowerSaveMode=0` signals from
+spawning additional recovery instances.
+
+Typical recovery: **1–2 cycles (~9–15 seconds)** for DPMS-only wakes. After full system
+suspend/resume, the Thunderbolt dock itself reinitialises and may need 4–5 cycles (~30s).
+
+Tracked in this repo:
+- `scripts/dp-mst-recover.sh` → `/usr/local/bin/dp-mst-recover.sh`
+- `scripts/dp-mst-monitor.sh` → `/usr/local/bin/dp-mst-monitor.sh`
+- `dotfiles/.config/systemd/user/dp-mst-monitor.service` → `~/.config/systemd/user/`
+
+**Deploy:**
 
 ```bash
-sudo vi /etc/modprobe.d/i915.conf
+# Scripts (as root)
+sudo cp scripts/dp-mst-recover.sh /usr/local/bin/dp-mst-recover.sh
+sudo cp scripts/dp-mst-monitor.sh /usr/local/bin/dp-mst-monitor.sh
+sudo chmod +x /usr/local/bin/dp-mst-recover.sh /usr/local/bin/dp-mst-monitor.sh
+
+# User service (as normal user)
+mkdir -p ~/.config/systemd/user
+cp dotfiles/.config/systemd/user/dp-mst-monitor.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now dp-mst-monitor.service
 ```
 
-Content (also tracked at `scripts/i915.conf` in this repo):
-
-```
-options i915 enable_dc=0
-```
-
-Then rebuild the initramfs and reboot:
+**Verify service is running:**
 
 ```bash
-sudo dracut --force
-sudo reboot
+systemctl --user status dp-mst-monitor.service
+# Should show Active: active (running)
 ```
 
-Verify after reboot:
+**Test recovery manually:**
 
 ```bash
-# Should show enable_dc:0
-sudo systool -m i915 -av 2>/dev/null | grep enable_dc
-# Or check journal — ACT timeout errors should be gone on next monitor wake
-journalctl -b --no-pager | grep -i "Failed to get ACT"
+/usr/local/bin/dp-mst-recover.sh &
+journalctl -t dp-mst-recover -f
+# Monitors should come back without needing Mac input switch
 ```
 
 ---
@@ -192,7 +228,10 @@ journalctl -b --no-pager | grep -i "Failed to get ACT"
 | `/etc/systemd/sleep.conf.d/thinkpad.conf` | Disables hibernate and hybrid sleep |
 | `/etc/udev/rules.d/99-fingerprint-pm.rules` | Keeps fingerprint USB always active (no autosuspend) |
 | `/usr/lib/systemd/system-sleep/fingerprint-reset.sh` | Rebinds the reader after each system wake |
-| `/etc/modprobe.d/i915.conf` | Disables i915 Display C-states to prevent DP MST link drops |
+| ~~`/etc/modprobe.d/i915.conf`~~ | Removed — was a misdiagnosis; tainted the kernel for no benefit |
+| `/usr/local/bin/dp-mst-recover.sh` | Cycles mutter PowerSaveMode in a loop until both monitors reconnect |
+| `/usr/local/bin/dp-mst-monitor.sh` | Watches mutter PowerSaveMode and spawns recovery script on wake |
+| `~/.config/systemd/user/dp-mst-monitor.service` | User systemd service that keeps the monitor daemon running |
 
 ---
 
@@ -204,7 +243,11 @@ journalctl -b --no-pager | grep -i "Failed to get ACT"
    ```bash
    journalctl -b -1 --no-pager | tail -100
    ```
-4. **Lock screen delay:** Lock → let monitors sleep → wake mouse/keyboard → lock screen should appear within a few seconds, not ~90s. No `Failed to get ACT` errors in journal.
+4. **Monitor wake:** Let screen blank (10 min idle) → wake with mouse → monitors should come
+   back without needing Mac input switch. Check recovery service log:
+   ```bash
+   journalctl --user -u dp-mst-monitor.service --since "15 minutes ago"
+   ```
 
 ---
 
@@ -214,7 +257,9 @@ journalctl -b --no-pager | grep -i "Failed to get ACT"
 sudo rm /etc/systemd/sleep.conf.d/thinkpad.conf
 sudo rm /etc/udev/rules.d/99-fingerprint-pm.rules
 sudo rm /usr/lib/systemd/system-sleep/fingerprint-reset.sh
-sudo rm /etc/modprobe.d/i915.conf
+sudo rm /usr/local/bin/dp-mst-recover.sh /usr/local/bin/dp-mst-monitor.sh
+systemctl --user disable --now dp-mst-monitor.service
+rm ~/.config/systemd/user/dp-mst-monitor.service
 gsettings reset org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type
 sudo udevadm control --reload-rules
 sudo dracut --force

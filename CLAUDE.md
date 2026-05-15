@@ -24,6 +24,9 @@ This repo documents the Fedora 43 configuration and fixes on Jean's ThinkPad T14
   - GNOME auto-suspend on AC disabled
   - Fingerprint USB autosuspend disabled via udev
   - Post-wake fingerprint rebind script deployed
+  - `enable_dc=0` removed (was tainting kernel with no benefit — misdiagnosis)
+  - DP MST recovery service deployed (`dp-mst-monitor.service`): triggers `intel_dp_detect()` on session wake to recover LG monitors without needing Mac input switch
+- GNOME keyring unlocks silently on fingerprint login (empty keyring password; see `hardware/gnome-keyring-empty-password.md`)
 
 ## Working with this repo
 

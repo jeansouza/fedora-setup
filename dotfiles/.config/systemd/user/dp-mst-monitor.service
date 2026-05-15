@@ -1,0 +1,15 @@
+# Deploy to: ~/.config/systemd/user/dp-mst-monitor.service
+# Enable with: systemctl --user enable --now dp-mst-monitor.service
+
+[Unit]
+Description=Trigger DP MST link recovery when session wakes from idle
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/dp-mst-monitor.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target
