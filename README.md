@@ -21,6 +21,8 @@ Personal documentation of the Fedora configuration on my ThinkPad T14.
 | Issue | Doc |
 |---|---|
 | Slow wake (~1 min), apps closing, fingerprint reader dying after wake | [power-management/thinkpad-power-management-fix.md](power-management/thinkpad-power-management-fix.md) |
+| Accents unavailable on ABNT2 and US International keyboards; ç produces ć on us(intl) | [hardware/keyboard-layout-accents.md](hardware/keyboard-layout-accents.md) |
+| Fingerprint login triggers "unlock Login keyring" popup on every login | [hardware/gnome-keyring-empty-password.md](hardware/gnome-keyring-empty-password.md) |
 
 ## Structure
 

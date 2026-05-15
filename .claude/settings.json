@@ -1,4 +1,14 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(gsettings get *)",
+      "Bash(systemctl status *)",
+      "Bash(lsusb *)",
+      "Bash(systemctl --user status *)",
+      "Bash(gdbus introspect *)",
+      "Bash(lspci *)"
+    ]
+  },
   "hooks": {
     "PreToolUse": [
       {
@@ -6,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sudo -v || true",
+            "command": "python3 -c \"import sys,json; d=json.load(sys.stdin); exit(0 if 'sudo' in d.get('command','') else 1)\" && sudo -v || true",
             "statusMessage": "Waiting for fingerprint authentication..."
           }
         ]
