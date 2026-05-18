@@ -35,6 +35,8 @@ for attempt in $(seq 1 10); do
     sleep 5            # ACT timeout is 3000ms; 2s margin for link to stabilise
     if is_recovered; then
         logger -t dp-mst-recover "monitors recovered on attempt $attempt"
+        sleep 2  # let mutter apply its saved config before we correct it
+        /usr/local/bin/fix-monitor-layout.py 2>&1 | logger -t fix-monitor-layout
         exit 0
     fi
 done

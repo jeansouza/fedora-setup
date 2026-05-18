@@ -1,0 +1,8 @@
+# Real path: ~/.config/autostart/fix-monitor-layout.desktop
+[Desktop Entry]
+Type=Application
+Name=Fix Monitor Layout
+Comment=Ensures ULTRAWIDE is always on the right after boot
+Exec=/usr/local/bin/fix-monitor-layout.py
+X-GNOME-Autostart-Delay=5
+NoDisplay=true
