@@ -1,0 +1,11 @@
+# Deploy path: ~/.config/systemd/user/update-notify.timer
+[Unit]
+Description=Daily DNF update check
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

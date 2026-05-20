@@ -1,0 +1,7 @@
+# Deploy path: ~/.config/systemd/user/update-notify.service
+[Unit]
+Description=Check for DNF updates and notify
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/update-notify.sh
